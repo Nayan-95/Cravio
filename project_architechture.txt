@@ -1,0 +1,299 @@
+Let's design the complete flow for your food ordering system with merchants (stalls) and users. I'll break this down into key components and workflows.
+
+## System Components
+
+1. **User Roles**:
+   - Merchant (stall owner)
+   - Customer (user)
+
+2. **Core Entities**:
+   - User/Merchant accounts
+   - Stalls
+   - Menu items
+   - Orders
+   - Reviews
+   - Queue tracking
+
+## High-Level Flow
+
+### 1. Registration & Authentication Flow
+```
+User/Merchant → Register → Verify Email → Login → Get JWT Token
+```
+
+### 2. Merchant-Side Flows
+
+**A. Stall Setup Flow**
+```
+Merchant → Create Stall → Add Location → Add Menu Categories → Add Menu Items → Publish Stall
+```
+
+**B. Order Management Flow**
+```
+New Order Notification → Merchant Accepts/Rejects → 
+If Accepted: 
+   Add to Queue → Prepare Order → Update Status (Preparing) → 
+   Ready for Pickup → Update Status (Ready) → 
+   Order Collected → Update Status (Completed)
+```
+
+### 3. Customer-Side Flows
+
+**A. Discovery & Ordering**
+```
+Customer → Search Nearby Stalls → View Menu → 
+Add to Cart → Place Order → Make Payment → 
+Receive Order Confirmation → Track Order Status
+```
+
+**B. Order Tracking**
+```
+Customer Views: 
+Queue Position → Estimated Wait Time → 
+Order Status (Accepted/Preparing/Ready) → 
+Notification when status changes
+```
+
+## Detailed Workflows
+
+### 1. Order Placement Flow
+
+```mermaid
+sequenceDiagram
+    Customer->>+Backend: Browse nearby stalls
+    Backend-->>-Customer: Return list with distances
+    Customer->>+Backend: View stall menu
+    Backend-->>-Customer: Return menu with categories/items
+    Customer->>+Backend: Add items to cart
+    Backend-->>-Customer: Cart updates
+    Customer->>+Backend: Place order (with special instructions)
+    Backend->>+Merchant: Real-time notification (Socket.IO)
+    Merchant->>+Backend: Accept/Reject order (timeout: auto-reject)
+    alt Order Accepted
+        Backend->>+Customer: Order confirmed
+        Backend->>+Database: Create order record
+        Backend->>+RabbitMQ: Add to processing queue
+    else Order Rejected
+        Backend->>+Customer: Order declined
+    end
+```
+
+### 2. Order Status Update Flow
+
+```mermaid
+sequenceDiagram
+    Merchant->>+Backend: Update status (Preparing/Ready/Completed)
+    Backend->>+Database: Update order status
+    Backend->>+RabbitMQ: Push status update
+    RabbitMQ->>+NotificationService: Consume update
+    NotificationService->>+Customer: Push notification (Socket.IO/Email)
+    NotificationService->>+QueueService: Update queue positions
+    QueueService->>+All Affected Customers: Update queue positions
+```
+
+### 3. Queue Management Logic
+
+```javascript
+class QueueManager {
+    constructor() {
+        this.stallQueues = new Map(); // stallId -> queue
+    }
+
+    addOrder(stallId, order) {
+        if (!this.stallQueues.has(stallId)) {
+            this.stallQueues.set(stallId, []);
+        }
+        
+        const queue = this.stallQueues.get(stallId);
+        order.queuePosition = queue.length + 1;
+        order.estimatedWaitTime = this.calculateWaitTime(stallId);
+        queue.push(order);
+        
+        return order;
+    }
+
+    completeOrder(stallId, orderId) {
+        const queue = this.stallQueues.get(stallId);
+        const index = queue.findIndex(o => o.id === orderId);
+        
+        if (index !== -1) {
+            queue.splice(index, 1);
+            // Update positions of remaining orders
+            queue.forEach((order, idx) => {
+                order.queuePosition = idx + 1;
+                order.estimatedWaitTime = this.calculateWaitTime(stallId);
+                this.notifyOrderUpdated(order);
+            });
+        }
+    }
+
+    calculateWaitTime(stallId) {
+        const queue = this.stallQueues.get(stallId) || [];
+        const avgPrepTime = 5; // minutes per item (configurable)
+        return queue.reduce((total, order) => {
+            return total + (order.items.length * avgPrepTime);
+        }, 0);
+    }
+
+    notifyOrderUpdated(order) {
+        // Implement notification logic
+    }
+}
+```
+
+## Database Schema Recommendations
+
+```javascript
+// User Schema
+const UserSchema = new Schema({
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    role: { type: String, enum: ['customer', 'merchant'], required: true },
+    profile: {
+        name: String,
+        phone: String,
+        avatar: String
+    },
+    // Merchant-specific fields
+    merchantDetails: {
+        businessName: String,
+        businessRegistration: String,
+        // other KYC details
+    }
+});
+
+// Stall Schema
+const StallSchema = new Schema({
+    merchant: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    name: { type: String, required: true },
+    description: String,
+    location: {
+        type: { type: String, default: 'Point' },
+        coordinates: { type: [Number], required: true } // [long, lat]
+    },
+    address: String,
+    openingHours: [{
+        day: { type: Number, required: true }, // 0-6 (Sun-Sat)
+        open: String, // "09:00"
+        close: String // "17:00"
+    }],
+    isActive: { type: Boolean, default: true }
+});
+
+// Menu Schema
+const MenuItemSchema = new Schema({
+    stall: { type: Schema.Types.ObjectId, ref: 'Stall', required: true },
+    category: { type: String, required: true },
+    name: { type: String, required: true },
+    description: String,
+    price: { type: Number, required: true },
+    preparationTime: Number, // minutes
+    isAvailable: { type: Boolean, default: true }
+});
+
+// Order Schema
+const OrderSchema = new Schema({
+    customer: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    stall: { type: Schema.Types.ObjectId, ref: 'Stall', required: true },
+    items: [{
+        menuItem: { type: Schema.Types.ObjectId, ref: 'MenuItem', required: true },
+        quantity: { type: Number, default: 1 },
+        specialInstructions: String
+    }],
+    status: { 
+        type: String, 
+        enum: ['pending', 'accepted', 'preparing', 'ready', 'completed', 'rejected'],
+        default: 'pending'
+    },
+    queuePosition: Number,
+    estimatedWaitTime: Number, // minutes
+    placedAt: { type: Date, default: Date.now },
+    completedAt: Date,
+    paymentStatus: { type: String, enum: ['pending', 'paid', 'refunded'], default: 'pending' }
+});
+
+// Review Schema
+const ReviewSchema = new Schema({
+    order: { type: Schema.Types.ObjectId, ref: 'Order', required: true },
+    customer: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    stall: { type: Schema.Types.ObjectId, ref: 'Stall', required: true },
+    rating: { type: Number, min: 1, max: 5, required: true },
+    comment: String,
+    createdAt: { type: Date, default: Date.now }
+});
+```
+
+## API Endpoints Structure
+
+```
+/auth
+  POST /register          - User registration
+  POST /login            - User login
+  POST /refresh-token    - Refresh JWT token
+
+/merchant
+  GET  /stalls           - Get merchant's stalls
+  POST /stalls           - Create new stall
+  PUT  /stalls/:id       - Update stall
+  GET  /stalls/:id/menu  - Get stall menu
+  POST /stalls/:id/menu  - Add menu item
+
+/customer
+  GET  /stalls/nearby    - Find nearby stalls
+  GET  /stalls/:id       - Get stall details
+  GET  /menu/:id         - Get menu details
+
+/orders
+  POST /                 - Place new order
+  GET  /                 - Get user's orders
+  GET  /:id              - Get order details
+  PUT  /:id/status       - Update order status (merchant)
+  GET  /:id/queue        - Get queue position
+
+/reviews
+  POST /                 - Submit review
+  GET  /stall/:id        - Get stall reviews
+```
+
+## Real-Time Communication Plan
+
+1. **Socket.IO Events**:
+
+```javascript
+// Merchant-side events
+socket.on('merchant:order-new', (order) => { /* show alert */ });
+socket.on('merchant:queue-update', (queue) => { /* update queue display */ });
+
+// Customer-side events
+socket.on('customer:order-update', (order) => { 
+  /* update status: "Your order is being prepared" */ 
+});
+socket.on('customer:queue-position', (position) => { 
+  /* "You're #3 in queue" */ 
+});
+```
+
+2. **RabbitMQ Queues**:
+   - `orders.new` - New order notifications
+   - `orders.status` - Status updates
+   - `notifications` - Customer notifications
+
+## Next Steps for Implementation
+
+1. **Set up core infrastructure**:
+   - Database with indexes (especially for geolocation queries)
+   - Authentication middleware
+   - Socket.IO and RabbitMQ integration
+
+2. **Implement critical flows first**:
+   - Merchant registration & stall setup
+   - Order placement with basic status updates
+   - Simple queue tracking
+
+3. **Then add**:
+   - Real-time notifications
+   - Advanced queue estimation
+   - Review system
+   - Analytics dashboard for merchants
+
+Would you like me to elaborate on any specific part of this architecture or show more detailed implementation code for particular components?
