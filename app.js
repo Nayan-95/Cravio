@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 require('dotenv').config();
+const cors = require('cors');
 
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs'); // Install with npm install yamljs
@@ -8,13 +9,14 @@ const YAML = require('yamljs'); // Install with npm install yamljs
 const swaggerDocument = YAML.load('./swagger.yaml');
 
 const app = express();
+app.use(cors());
 
-
-// Swagger setup
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Middleware
 app.use(express.json());
+
+// Swagger setup
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
