@@ -2,7 +2,16 @@ const express = require('express');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
+const swaggerUi = require('swagger-ui-express');
+const YAML = require('yamljs'); // Install with npm install yamljs
+// Load the YAML file
+const swaggerDocument = YAML.load('./swagger.yaml');
+
 const app = express();
+
+
+// Swagger setup
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Middleware
 app.use(express.json());

@@ -88,7 +88,7 @@ exports.placeOrder = async (req, res) => {
   
   try {
     // Validate input
-    if (!Array.isArray(items) {
+    if (!Array.isArray(items)) {
       return res.status(400).json({ error: 'Items must be an array' });
     }
 

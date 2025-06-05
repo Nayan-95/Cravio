@@ -14,15 +14,15 @@ async function startServer() {
         await connectDB();
         
         // Initialize RabbitMQ connection and consumer
-        const { channel } = await initializeRabbitMQ();
+        // const { channel } = await initializeRabbitMQ();
         
         // Initialize Socket.IO with the server and channel
-        initializeSocket(server, channel);
+        // initializeSocket(server, channel);
         
-        const PORT = process.env.PORT || 5000;
+        const PORT = process.env.PORT || 3000;
         server.listen(PORT, () => {
             console.log(`Server running on http://localhost:${PORT}`);
-            console.log(`WebSocket server is running`);
+            // console.log(`WebSocket server is running`);
         });
     } catch (error) {
         console.error('Failed to start server:', error);
