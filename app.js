@@ -9,7 +9,7 @@ const YAML = require('yamljs'); // Install with npm install yamljs
 const swaggerDocument = YAML.load('./swagger.yaml');
 
 const app = express();
-app.use(cors());
+app.use(cors('*'));
 
 
 // Middleware
